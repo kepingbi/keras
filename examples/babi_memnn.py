@@ -1,24 +1,24 @@
-'''Train a memory network on the bAbI dataset.
+'''Trains a memory network on the bAbI dataset.
 
 References:
 - Jason Weston, Antoine Bordes, Sumit Chopra, Tomas Mikolov, Alexander M. Rush,
   "Towards AI-Complete Question Answering: A Set of Prerequisite Toy Tasks",
-  http://arxiv.org/abs/1503.08895
+  http://arxiv.org/abs/1502.05698
 
 - Sainbayar Sukhbaatar, Arthur Szlam, Jason Weston, Rob Fergus,
   "End-To-End Memory Networks",
   http://arxiv.org/abs/1503.08895
 
-Reaches 93% accuracy on task 'single_supporting_fact_10k' after 70 epochs.
+Reaches 98.6% accuracy on task 'single_supporting_fact_10k' after 120 epochs.
 Time per epoch: 3s on CPU (core i7).
 '''
 
 from __future__ import print_function
 from keras.models import Sequential
 from keras.layers.embeddings import Embedding
-from keras.layers.core import Activation, Dense, Merge, Permute, Dropout
-from keras.layers.recurrent import LSTM
-from keras.datasets.data_utils import get_file
+from keras.layers import Activation, Dense, Merge, Permute, Dropout
+from keras.layers import LSTM
+from keras.utils.data_utils import get_file
 from keras.preprocessing.sequence import pad_sequences
 from functools import reduce
 import tarfile
@@ -94,8 +94,13 @@ def vectorize_stories(data, word_idx, story_maxlen, query_maxlen):
             pad_sequences(Xq, maxlen=query_maxlen), np.array(Y))
 
 
-path = get_file('babi-tasks-v1-2.tar.gz',
-                origin='http://www.thespermwhale.com/jaseweston/babi/tasks_1-20_v1-2.tar.gz')
+try:
+    path = get_file('babi-tasks-v1-2.tar.gz', origin='http://www.thespermwhale.com/jaseweston/babi/tasks_1-20_v1-2.tar.gz')
+except:
+    print('Error downloading dataset, please download it manually:\n'
+          '$ wget http://www.thespermwhale.com/jaseweston/babi/tasks_1-20_v1-2.tar.gz\n'
+          '$ mv tasks_1-20_v1-2.tar.gz ~/.keras/datasets/babi-tasks-v1-2.tar.gz')
+    raise
 tar = tarfile.open(path)
 
 challenges = {
@@ -153,25 +158,28 @@ input_encoder_m = Sequential()
 input_encoder_m.add(Embedding(input_dim=vocab_size,
                               output_dim=64,
                               input_length=story_maxlen))
+input_encoder_m.add(Dropout(0.3))
 # output: (samples, story_maxlen, embedding_dim)
 # embed the question into a sequence of vectors
 question_encoder = Sequential()
 question_encoder.add(Embedding(input_dim=vocab_size,
                                output_dim=64,
                                input_length=query_maxlen))
+question_encoder.add(Dropout(0.3))
 # output: (samples, query_maxlen, embedding_dim)
 # compute a 'match' between input sequence elements (which are vectors)
 # and the question vector sequence
 match = Sequential()
 match.add(Merge([input_encoder_m, question_encoder],
                 mode='dot',
-                dot_axes=[(2,), (2,)]))
+                dot_axes=[2, 2]))
 # output: (samples, story_maxlen, query_maxlen)
 # embed the input into a single vector with size = story_maxlen:
 input_encoder_c = Sequential()
 input_encoder_c.add(Embedding(input_dim=vocab_size,
                               output_dim=query_maxlen,
                               input_length=story_maxlen))
+input_encoder_c.add(Dropout(0.3))
 # output: (samples, story_maxlen, query_maxlen)
 # sum the match vector with the input vector:
 response = Sequential()
@@ -185,17 +193,17 @@ answer = Sequential()
 answer.add(Merge([response, question_encoder], mode='concat', concat_axis=-1))
 # the original paper uses a matrix multiplication for this reduction step.
 # we choose to use a RNN instead.
-answer.add(LSTM(64))
+answer.add(LSTM(32))
 # one regularization layer -- more would probably be needed.
-answer.add(Dropout(0.25))
+answer.add(Dropout(0.3))
 answer.add(Dense(vocab_size))
 # we output a probability distribution over the vocabulary
 answer.add(Activation('softmax'))
 
-answer.compile(optimizer='rmsprop', loss='categorical_crossentropy')
+answer.compile(optimizer='rmsprop', loss='categorical_crossentropy',
+               metrics=['accuracy'])
 # Note: you could use a Graph model to avoid repeat the input twice
 answer.fit([inputs_train, queries_train, inputs_train], answers_train,
            batch_size=32,
-           nb_epoch=70,
-           show_accuracy=True,
+           nb_epoch=120,
            validation_data=([inputs_test, queries_test, inputs_test], answers_test))
